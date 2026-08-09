@@ -41,6 +41,19 @@ fn alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
 }
 
+/// Blend towards `to` and stay opaque. `round_rect` is built from overlapping
+/// rectangles and corner circles, so a translucent fill blends twice where they
+/// meet and the corners show up as darker blobs; anything large enough to notice
+/// has to be drawn opaque.
+fn mix(from: Color, to: Color, t: f32) -> Color {
+    Color::new(
+        from.r + (to.r - from.r) * t,
+        from.g + (to.g - from.g) * t,
+        from.b + (to.b - from.b) * t,
+        1.0,
+    )
+}
+
 // ------------------------------------------------------------------- locale
 
 #[derive(Clone, Copy, PartialEq)]
@@ -897,6 +910,43 @@ fn do_act(a: Act, g: &mut Game, ui: &mut Ui) {
     }
 }
 
+/// The single action the player needs next, as a large button in the middle of the
+/// board. The shortcut list along the bottom is fine with a keyboard, but on a phone
+/// the end-of-level screen has to offer one obvious target.
+fn primary_button(ui: &Ui, g: &Game) -> Option<(Rect, Act, String)> {
+    let bw = PANEL_X - 20.0;
+    let (act, label, y) = match g.status {
+        Status::Cleared(_) if g.idx + 1 < g.levels.len() => (
+            Act::Next,
+            ui.tr(&S("Next theme", "次のテーマへ")),
+            612.0,
+        ),
+        Status::Failed => (Act::Restart, ui.tr(&S("Try again", "やり直す")), 520.0),
+        _ => return None,
+    };
+    let w = 340.0;
+    Some((Rect::new(bw / 2.0 - w / 2.0, y, w, 70.0), act, label.to_string()))
+}
+
+fn draw_primary(ui: &Ui, b: &(Rect, Act, String), m: Vec2, a: f32) {
+    let (r, act, label) = b;
+    let tint = if *act == Act::Restart { RED } else { GREEN };
+    let hot = r.contains(m);
+    let fill = mix(BG, tint, if hot { 0.26 } else { 0.15 });
+    let edge = mix(BG, tint, 0.7);
+    ui.round_frame(r.x, r.y, r.w, r.h, 14.0, fill, edge, 2.0);
+    ui.text_center(label, r.x + r.w / 2.0, r.y + 38.0, 25.0, alpha(tint, a), Face::Sans);
+    let key = if *act == Act::Restart { "R" } else { "N" };
+    ui.text_center(
+        &format!("{key} / tap"),
+        r.x + r.w / 2.0,
+        r.y + 58.0,
+        13.0,
+        alpha(FAINT, a),
+        Face::Sans,
+    );
+}
+
 fn draw_key_bar(ui: &Ui, bar: &[(Rect, Act, String)], m: Vec2) {
     for (r, _, label) in bar {
         let hot = r.contains(m);
@@ -1063,9 +1113,10 @@ async fn main() {
         let mut consumed = false;
         if is_mouse_button_pressed(MouseButton::Left) {
             let hits: Vec<Act> = key_bar(&ui, &g)
-                .iter()
+                .into_iter()
+                .chain(primary_button(&ui, &g))
                 .filter(|(r, _, _)| r.contains(m))
-                .map(|(_, a, _)| *a)
+                .map(|(_, a, _)| a)
                 .collect();
             for a in hits {
                 do_act(a, &mut g, &mut ui);
@@ -1188,8 +1239,6 @@ async fn main() {
         };
         ui.text_right(&m_txt, PANEL_X + PANEL_W, 52.0, 16.0, DIM, Face::Sans);
 
-        // rebuilt after input so the labels reflect anything a tap just changed
-        draw_key_bar(&ui, &key_bar(&ui, &g), m);
 
         if matches!(g.status, Status::Failed) {
             let r = &g.lvl().rooms[g.holder];
@@ -1197,12 +1246,12 @@ async fn main() {
                 Lang::En => format!("`{}` dropped at the end of `{}`", r.binding, r.name),
                 Lang::Ja => format!("`{}` は `{}` の終わりで破棄された", r.binding, r.name),
             };
-            ui.rect(0.0, 380.0, bw, 130.0, alpha(BG, 0.93));
+            ui.rect(0.0, 380.0, bw, 240.0, alpha(BG, 0.93));
             ui.text_center(&msg, bw / 2.0, 435.0, 24.0, RED, Face::Sans);
             ui.text_center(
                 ui.tr(&S(
-                    "that scope never returns it  -  press R",
-                    "そのスコープは値を返さない  -  R でやり直し",
+                    "that scope never returns it",
+                    "そのスコープは値を返さない",
                 )),
                 bw / 2.0,
                 470.0,
@@ -1214,7 +1263,9 @@ async fn main() {
 
         if let Status::Cleared(t) = g.status {
             let a = (t / 0.35).min(1.0);
-            ui.rect(0.0, 0.0, bw, DH, alpha(BG, 0.9 * a));
+            // fully opaque once faded in: the board showing through collided with the
+            // takeaway text and made both hard to read
+            ui.rect(0.0, 0.0, bw, DH, alpha(BG, a));
             ui.text_center(
                 ui.tr(&S("delivered", "配達完了")),
                 bw / 2.0,
@@ -1250,12 +1301,32 @@ async fn main() {
                 alpha(FAINT, a),
                 Face::Sans,
             );
-            let tail = if g.idx + 1 < g.levels.len() {
-                S("press N for the next theme", "N で次のテーマへ")
-            } else {
-                S("next: shared references, then &mut", "次は共有参照、そして &mut")
+            // the button itself is drawn below; only the final level has no next step
+            if g.idx + 1 >= g.levels.len() {
+                ui.text_center(
+                    ui.tr(&S(
+                        "next: shared references, then &mut",
+                        "次は共有参照、そして &mut",
+                    )),
+                    bw / 2.0,
+                    600.0,
+                    20.0,
+                    alpha(GREEN, a),
+                    Face::Sans,
+                );
+            }
+        }
+
+        // Controls last, so the end-of-level overlays cannot paint over them - that is
+        // exactly what hid the Next button and left a phone with no way forward.
+        // Rebuilt after input so labels reflect anything a tap just changed.
+        draw_key_bar(&ui, &key_bar(&ui, &g), m);
+        if let Some(b) = primary_button(&ui, &g) {
+            let a = match g.status {
+                Status::Cleared(t) => (t / 0.35).min(1.0),
+                _ => 1.0,
             };
-            ui.text_center(ui.tr(&tail), bw / 2.0, 590.0, 20.0, alpha(GREEN, a), Face::Sans);
+            draw_primary(&ui, &b, m, a);
         }
 
         next_frame().await

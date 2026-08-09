@@ -96,8 +96,10 @@
   });
 
   // ?drag is given in the game's 1600x900 design space and converted here, so the
-  // harness does not have to guess the canvas size or letterboxing.
-  var d = (q.get('drag') || '').split(',').map(Number);
+  // harness does not have to guess the canvas size or letterboxing. Repeat the
+  // parameter to chain moves and reach an end-of-level screen.
+  q.getAll('drag').forEach(function (spec) {
+  var d = spec.split(',').map(Number);
   if (d.length === 4) {
     // design -> framebuffer (what the game lays out against, i.e. cv.width/height)
     // -> client pixels (what the event carries). The two differ: the CSS box and the
@@ -125,6 +127,7 @@
       function () { mouse('mouseup', d[2], d[3]); }
     );
   }
+  });
 
   // Paced by setTimeout. requestAnimationFrame does not reliably advance under
   // --virtual-time-budget in headless, so a frame-counting sequencer never fires;
