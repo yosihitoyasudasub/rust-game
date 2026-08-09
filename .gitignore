@@ -1,0 +1,10 @@
+/target
+/tools/*/target
+
+# local test harness output
+/docs/access.log
+/docs/shot*.png
+
+# The Japanese Rust book, kept locally as a writing reference. It is someone else's
+# work; there is no reason to republish a copy of it from this repository.
+/input

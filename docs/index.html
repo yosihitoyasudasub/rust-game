@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Ownership</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0f1219; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  /* console mirror, so a headless run can be inspected via the DOM */
+  /* hidden unless ?log=1 - a headless screenshot can then read the console */
+  #log { position: absolute; left: 0; top: 0; margin: 0; z-index: 10; padding: 6px;
+         color: #7fd6a0; background: rgba(0,0,0,.75); font: 13px monospace;
+         white-space: pre-wrap; pointer-events: none; display: none; }
+</style>
+</head>
+<body>
+<canvas id="glcanvas" tabindex="1"></canvas>
+<pre id="log"></pre>
+<script>
+  // mirror everything the wasm prints into the DOM
+  window.__log = [];
+  function flush() {
+    var el = document.getElementById('log');
+    if (el) el.textContent = window.__log.join('\n');
+  }
+  ['log', 'warn', 'error'].forEach(function (k) {
+    var orig = console[k].bind(console);
+    console[k] = function () {
+      window.__log.push(k + ': ' + Array.prototype.join.call(arguments, ' '));
+      flush();
+      orig.apply(null, arguments);
+    };
+  });
+  window.onerror = function (msg, src, line) {
+    window.__log.push('onerror: ' + msg + ' @' + src + ':' + line);
+    flush();
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    window.__log.push('unhandledrejection: ' + e.reason);
+    flush();
+  });
+</script>
+<script>
+  // does this browser actually give us WebGL?
+  (function () {
+    var c = document.createElement('canvas');
+    var g = c.getContext('webgl') || c.getContext('experimental-webgl');
+    console.log('webgl: ' + (g ? g.getParameter(g.VERSION) + ' | ' + g.getParameter(g.RENDERER) : 'NULL'));
+  })();
+</script>
+<script src="mq_js_bundle.js"></script>
+<script>load("ownership.wasm");</script>
+<script>
+// Everything here lives in an IIFE: mq_js_bundle.js declares `canvas`, `gl` and others
+// as top-level consts, so a bare `var canvas` here is a redeclaration SyntaxError that
+// silently kills this whole script block.
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('log') === '1') document.getElementById('log').style.display = 'block';
+
+  var cv = document.getElementById('glcanvas');
+
+  // ?fixed=1 pins the canvas to exactly the design size. Headless reports one canvas
+  // size to script while compositing the screenshot at another, which makes the
+  // design -> client mapping ambiguous by a few pixels - enough to miss a 88px slot.
+  if (q.get('fixed') === '1') {
+    cv.style.width = '1600px';
+    cv.style.height = '900px';
+    cv.width = 1600;
+    cv.height = 900;
+  }
+
+  setTimeout(function () {
+    console.log('canvas buffer: ' + cv.width + 'x' + cv.height +
+                ' css: ' + cv.clientWidth + 'x' + cv.clientHeight);
+  }, 3000);
+
+  // Headless driving: ?keys=Space,KeyN and ?drag=x1,y1,x2,y2 in design coordinates.
+  //
+  // Steps are paced by requestAnimationFrame, NOT setTimeout. Under
+  // --virtual-time-budget the browser fast-forwards timers, so a setTimeout sequence
+  // delivers mousedown and mouseup inside a single game frame; macroquad then sees
+  // press and release together with the cursor already at the drop point, the grab
+  // test fails, and the drag silently does nothing.
+  var key = function (code) {
+    console.log('key ' + code);
+    cv.dispatchEvent(new KeyboardEvent('keydown', { code: code, bubbles: true }));
+    cv.dispatchEvent(new KeyboardEvent('keyup', { code: code, bubbles: true }));
+  };
+
+  var steps = [];
+  (q.get('keys') || '').split(',').filter(Boolean).forEach(function (code) {
+    steps.push(function () { key(code); });
+  });
+
+  // ?drag is given in the game's 1600x900 design space and converted here, so the
+  // harness does not have to guess the canvas size or letterboxing.
+  var d = (q.get('drag') || '').split(',').map(Number);
+  if (d.length === 4) {
+    // design -> framebuffer (what the game lays out against, i.e. cv.width/height)
+    // -> client pixels (what the event carries). The two differ: the CSS box and the
+    // drawing buffer are not always the same size, and miniquad rescales by that ratio.
+    var mouse = function (type, x, y) {
+      var s = Math.min(cv.width / 1600, cv.height / 900);
+      var gx = (cv.width - 1600 * s) / 2 + x * s;
+      var gy = (cv.height - 900 * s) / 2 + y * s;
+      var r = cv.getBoundingClientRect();
+      var sx = r.left + gx * r.width / cv.width;
+      var sy = r.top + gy * r.height / cv.height;
+      console.log(type + ' design(' + x + ',' + y + ') buf' + cv.width + 'x' + cv.height +
+                  ' -> game(' + Math.round(gx) + ',' + Math.round(gy) + ')' +
+                  ' client(' + Math.round(sx) + ',' + Math.round(sy) + ')');
+      cv.dispatchEvent(new MouseEvent(type, {
+        clientX: sx, clientY: sy, button: 0, buttons: 1, bubbles: true
+      }));
+    };
+    steps.push(
+      function () { mouse('mousemove', d[0], d[1]); },
+      function () { mouse('mousedown', d[0], d[1]); },
+      // hold in place for one step so a frame observes the press over the source slot
+      function () { mouse('mousemove', d[0], d[1]); },
+      function () { mouse('mousemove', d[2], d[3]); },
+      function () { mouse('mouseup', d[2], d[3]); }
+    );
+  }
+
+  // Paced by setTimeout. requestAnimationFrame does not reliably advance under
+  // --virtual-time-budget in headless, so a frame-counting sequencer never fires;
+  // timers do advance, and a wide gap gives the game's own rAF loop room to observe
+  // press and release on separate frames.
+  var START = Number(q.get('start') || 3000);
+  var GAP = Number(q.get('gap') || 1500);
+  steps.forEach(function (fn, i) { setTimeout(fn, START + i * GAP); });
+  setTimeout(function () { console.log('sequence done (' + steps.length + ' steps)'); },
+             START + steps.length * GAP);
+})();
+</script>
+</body>
+</html>
