@@ -3,6 +3,12 @@ name = "ownership"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Builds the board on its own, to sit inside a page of the book. The surrounding
+# prose already carries the explanation and the source listing, so the briefing
+# and the code panel would only repeat it.
+embed = []
+
 [dependencies]
 macroquad = "0.4"
 

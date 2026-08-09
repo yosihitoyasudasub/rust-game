@@ -277,6 +277,8 @@ struct Layout {
     dw: f32,
     dh: f32,
     portrait: bool,
+    /// Board only, sized to sit in a column of prose.
+    embed: bool,
     rw: f32,
     rh: f32,
     /// where rooms are laid out
@@ -292,6 +294,28 @@ struct Layout {
 
 impl Layout {
     fn new(sw: f32, sh: f32) -> Layout {
+        if cfg!(feature = "embed") {
+            // The panel is parked off-screen rather than removed, so the drawing code
+            // stays common to both builds.
+            let dw = 700.0;
+            let dh = (dw * sh / sw).clamp(300.0, 620.0);
+            return Layout {
+                dw,
+                dh,
+                portrait: false,
+                embed: true,
+                rw: 196.0,
+                rh: 84.0,
+                board: Rect::new(10.0, 44.0, dw - 20.0, dh - 44.0 - 40.0),
+                panel: Rect::new(-9999.0, 0.0, 1.0, 1.0),
+                code_h: 20.0,
+                comment_h: 16.0,
+                code_size: 13.0,
+                bar_y: dh - 34.0,
+                bar_h: 30.0,
+                brief: Rect::new(0.0, 0.0, dw, dh),
+            };
+        }
         if sh > sw * 1.15 {
             // Narrow design space so a design unit is close to a CSS pixel; otherwise
             // everything scales down to the point of being unreadable on a phone.
@@ -307,6 +331,7 @@ impl Layout {
                 dw,
                 dh,
                 portrait: true,
+                embed: false,
                 rw: 218.0,
                 rh: 74.0,
                 board: Rect::new(8.0, top, dw - 16.0, board_h),
@@ -324,6 +349,7 @@ impl Layout {
                 dw: 1600.0,
                 dh: 900.0,
                 portrait: false,
+                embed: false,
                 rw: 228.0,
                 rh: 96.0,
                 board: Rect::new(20.0, 110.0, 1110.0, 700.0),
@@ -340,7 +366,9 @@ impl Layout {
 
     /// The half of the screen the board lives on - what the end-of-level overlays cover.
     fn stage(&self) -> Rect {
-        if self.portrait {
+        if self.embed {
+            Rect::new(0.0, 0.0, self.dw, self.dh)
+        } else if self.portrait {
             Rect::new(0.0, 0.0, self.dw, self.panel.y - 6.0)
         } else {
             Rect::new(0.0, 0.0, self.panel.x - 20.0, self.dh)
@@ -487,7 +515,9 @@ impl Game {
             ghosts: vec![false; n],
             path: vec![0],
             dragging: false,
-            status: Status::Briefing,
+            // embedded in the book there is nothing to brief: the surrounding prose
+            // has already said all of it, so the board is live immediately
+            status: if cfg!(feature = "embed") { Status::Playing } else { Status::Briefing },
             err: None,
             hover_room: None,
             t: 0.0,
@@ -881,6 +911,20 @@ fn key_bar(ui: &Ui, g: &Game) -> Vec<(Rect, Act, String)> {
     let gap = if lay.portrait { 6.0 } else { 18.0 };
 
     let mut items: Vec<(Act, String)> = Vec::new();
+    if lay.embed {
+        // the book supplies the explanation and the listing; only a retry is needed
+        items.push((Act::Restart, ui.tr(&S("R  restart", "R  やり直し")).into()));
+        let mut x = 10.0;
+        return items
+            .into_iter()
+            .map(|(a, s)| {
+                let w = ui.width(&s, size, Face::Sans) + pad * 2.0;
+                let r = Rect::new(x, lay.bar_y, w, lay.bar_h);
+                x += w + gap;
+                (r, a, s)
+            })
+            .collect();
+    }
     if matches!(g.status, Status::Cleared(_)) {
         if g.idx + 1 < g.levels.len() {
             items.push((Act::Next, ui.tr(&S("N  next", "N  次へ")).into()));
@@ -1378,8 +1422,12 @@ async fn main() {
         clear_background(BG);
         ui.rect(Rect::new(0.0, 0.0, ui.lay.dw, ui.lay.dh), BG);
 
-        let lines = g.source(preview);
-        let code_hover = draw_panel(&ui, &g, &lines, m);
+        let code_hover = if ui.lay.embed {
+            None
+        } else {
+            let lines = g.source(preview);
+            draw_panel(&ui, &g, &lines, m)
+        };
 
         let holder = g.holder;
         let playing = matches!(g.status, Status::Playing);
@@ -1425,29 +1473,36 @@ async fn main() {
 
         // ------------------------------------------------------------ chrome
         let st = ui.lay.stage();
-        let title = if ui.lay.portrait { 19.0 } else { 24.0 };
-        ui.text(ui.tr(&g.lvl().title), 16.0, title * 1.7, title, INK, Face::Sans);
-        let label = ui.tr(&S("GOAL", "目的"));
-        let gs = if ui.lay.portrait { 13.0 } else { 16.0 };
-        ui.text(label, 16.0, title * 1.7 + gs * 1.6, 11.5, FAINT, Face::Sans);
-        ui.text(
-            ui.tr(&g.lvl().goal),
-            16.0 + ui.width(label, 11.5, Face::Sans) + 10.0,
-            title * 1.7 + gs * 1.6,
-            gs,
-            DIM,
-            Face::Sans,
-        );
-
         let moves = g.path.len() - 1;
+        let gs = if ui.lay.portrait { 13.0 } else { 16.0 };
+
+        if ui.lay.embed {
+            // one line: the objective, and the move count. No level title - the book's
+            // own heading is the title here.
+            ui.text(ui.tr(&g.lvl().goal), 12.0, 26.0, 14.0, DIM, Face::Sans);
+        } else {
+            let title = if ui.lay.portrait { 19.0 } else { 24.0 };
+            ui.text(ui.tr(&g.lvl().title), 16.0, title * 1.7, title, INK, Face::Sans);
+            let label = ui.tr(&S("GOAL", "目的"));
+            ui.text(label, 16.0, title * 1.7 + gs * 1.6, 11.5, FAINT, Face::Sans);
+            ui.text(
+                ui.tr(&g.lvl().goal),
+                16.0 + ui.width(label, 11.5, Face::Sans) + 10.0,
+                title * 1.7 + gs * 1.6,
+                gs,
+                DIM,
+                Face::Sans,
+            );
+        }
+
         ui.text_right(
             &match ui.lang {
                 Lang::En => format!("{moves} moves"),
                 Lang::Ja => format!("{moves} 手"),
             },
-            ui.lay.dw - 16.0,
-            title * 1.7,
-            gs,
+            ui.lay.dw - 12.0,
+            if ui.lay.embed { 26.0 } else { (if ui.lay.portrait { 19.0 } else { 24.0 }) * 1.7 },
+            if ui.lay.embed { 14.0 } else { gs },
             DIM,
             Face::Sans,
         );

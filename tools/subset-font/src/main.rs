@@ -23,6 +23,13 @@ fn main() {
     let text = std::fs::read_to_string(root.join("src/main.rs")).expect("read src/main.rs");
 
     let mut chars: BTreeSet<char> = text.chars().filter(|c| !c.is_control()).collect();
+    // extra text files may be passed to widen the glyph set, e.g. to size what a
+    // whole book's worth of prose would cost
+    for extra in std::env::args().skip(1) {
+        let t = std::fs::read_to_string(root.join(&extra))
+            .unwrap_or_else(|e| panic!("read {extra}: {e}"));
+        chars.extend(t.chars().filter(|c| !c.is_control()));
+    }
     // keep all printable ASCII even if some is unused today, so adding an English
     // string later cannot silently render as blanks
     chars.extend((0x20u8..=0x7e).map(|b| b as char));
