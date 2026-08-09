@@ -827,6 +827,86 @@ fn draw_panel(ui: &Ui, g: &Game, lines: &[CodeLine], m: Vec2) -> Option<usize> {
     hovered
 }
 
+// ------------------------------------------------------------------- buttons
+
+/// Everything the keyboard can do. Touch devices have no keyboard, so without an
+/// on-screen equivalent a phone player cannot even leave the first level.
+#[derive(Clone, Copy, PartialEq)]
+enum Act {
+    Brief,
+    Comments,
+    Restart,
+    Lang,
+    Next,
+}
+
+/// The bottom bar, as tappable rectangles. Built from the same data that draws it,
+/// so the hit boxes cannot drift away from the labels.
+fn key_bar(ui: &Ui, g: &Game) -> Vec<(Rect, Act, String)> {
+    let mut out: Vec<(Rect, Act, String)> = Vec::new();
+    let mut x = 34.0;
+    let mut push = |a: Act, s: &str| {
+        let w = ui.width(s, 15.0, Face::Sans);
+        out.push((Rect::new(x, 846.0, w + 24.0, 32.0), a, s.to_string()));
+        x += w + 42.0;
+    };
+
+    if matches!(g.status, Status::Cleared(_)) {
+        let last = g.idx + 1 >= g.levels.len();
+        if !last {
+            push(Act::Next, ui.tr(&S("N  next theme", "N  次のテーマへ")));
+        }
+    } else {
+        push(Act::Brief, ui.tr(&S("H  why this level", "H  このステージの狙い")));
+        push(
+            Act::Comments,
+            if ui.comments {
+                ui.tr(&S("C  comments off", "C  コメントを消す"))
+            } else {
+                ui.tr(&S("C  comments on", "C  コメントを出す"))
+            },
+        );
+    }
+    push(Act::Restart, ui.tr(&S("R  restart", "R  やり直し")));
+    if ui.bilingual() {
+        push(Act::Lang, ui.tr(&S("L  日本語", "L  English")));
+    }
+    out
+}
+
+fn do_act(a: Act, g: &mut Game, ui: &mut Ui) {
+    match a {
+        Act::Brief => {
+            if matches!(g.status, Status::Playing) {
+                g.status = Status::Briefing;
+                g.dragging = false;
+            }
+        }
+        Act::Comments => ui.comments = !ui.comments,
+        Act::Restart => g.reset(),
+        Act::Lang => {
+            if ui.bilingual() {
+                ui.lang = if ui.lang == Lang::Ja { Lang::En } else { Lang::Ja };
+            }
+        }
+        Act::Next => {
+            if matches!(g.status, Status::Cleared(_)) {
+                g.next_level();
+            }
+        }
+    }
+}
+
+fn draw_key_bar(ui: &Ui, bar: &[(Rect, Act, String)], m: Vec2) {
+    for (r, _, label) in bar {
+        let hot = r.contains(m);
+        if hot {
+            ui.round_rect(r.x, r.y, r.w, r.h, 7.0, alpha(BLUE, 0.12));
+        }
+        ui.text(label, r.x + 12.0, r.y + 21.0, 15.0, if hot { DIM } else { FAINT }, Face::Sans);
+    }
+}
+
 // ------------------------------------------------------------------ briefing
 
 /// Answers "why am I being asked to do this" before the level starts, and again
@@ -978,7 +1058,22 @@ async fn main() {
 
         g.hover_room = (0..g.lvl().rooms.len()).find(|&i| g.lvl().rooms[i].rect().contains(m));
 
-        if matches!(g.status, Status::Playing) {
+        // Buttons take the click first and swallow it, so tapping the bar cannot also
+        // dismiss the briefing or be read as grabbing the crate.
+        let mut consumed = false;
+        if is_mouse_button_pressed(MouseButton::Left) {
+            let hits: Vec<Act> = key_bar(&ui, &g)
+                .iter()
+                .filter(|(r, _, _)| r.contains(m))
+                .map(|(_, a, _)| *a)
+                .collect();
+            for a in hits {
+                do_act(a, &mut g, &mut ui);
+                consumed = true;
+            }
+        }
+
+        if matches!(g.status, Status::Playing) && !consumed {
             if is_mouse_button_pressed(MouseButton::Left) {
                 if g.lvl().rooms[g.holder].slot().contains(m) {
                     g.dragging = true;
@@ -1003,7 +1098,7 @@ async fn main() {
         if matches!(g.status, Status::Briefing) {
             if is_key_pressed(KeyCode::Space)
                 || is_key_pressed(KeyCode::Enter)
-                || is_mouse_button_pressed(MouseButton::Left)
+                || (is_mouse_button_pressed(MouseButton::Left) && !consumed)
             {
                 g.status = Status::Playing;
             }
@@ -1093,24 +1188,8 @@ async fn main() {
         };
         ui.text_right(&m_txt, PANEL_X + PANEL_W, 52.0, 16.0, DIM, Face::Sans);
 
-        // one key bar along the bottom, out of the way of the board
-        let cmt = if ui.comments {
-            S("C  comments off", "C  コメントを消す")
-        } else {
-            S("C  comments on", "C  コメントを出す")
-        };
-        let mut kx = 40.0;
-        let mut key = |ui: &Ui, s: &S| {
-            let t = ui.tr(s);
-            ui.text(t, kx, 866.0, 15.0, FAINT, Face::Sans);
-            kx += ui.width(t, 15.0, Face::Sans) + 34.0;
-        };
-        key(&ui, &S("H  why this level", "H  このステージの狙い"));
-        key(&ui, &cmt);
-        key(&ui, &S("R  restart", "R  やり直し"));
-        if ui.bilingual() {
-            key(&ui, &S("L  日本語", "L  English"));
-        }
+        // rebuilt after input so the labels reflect anything a tap just changed
+        draw_key_bar(&ui, &key_bar(&ui, &g), m);
 
         if matches!(g.status, Status::Failed) {
             let r = &g.lvl().rooms[g.holder];
