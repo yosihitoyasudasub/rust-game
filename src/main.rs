@@ -316,7 +316,8 @@ impl Layout {
                 code_size: 12.0,
                 bar_y,
                 bar_h: 34.0,
-                brief: Rect::new(10.0, 96.0, dw - 20.0, dh - 190.0),
+                // capped so the card hugs its text instead of leaving a tall empty box
+                brief: Rect::new(10.0, 96.0, dw - 20.0, (dh - 190.0).min(680.0)),
             }
         } else {
             Layout {
@@ -1353,6 +1354,13 @@ async fn main() {
             g.status = Status::Briefing;
             g.dragging = false;
         }
+
+        // Input may have advanced the level, and the geometry computed at the top of
+        // the frame still describes the previous one. A level with more rooms then
+        // indexes past it and the whole loop panics, leaving a blank canvas - which is
+        // exactly what tapping Next did. Recompute before anything reads it again.
+        let rects = place_rooms(&ui.lay, g.lvl());
+        g.hover_room = (0..rects.len()).find(|&i| rects[i].contains(m));
 
         // the room the crate is hovering over, if dropping it there would be legal
         let preview = if g.dragging {

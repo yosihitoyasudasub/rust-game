@@ -104,10 +104,20 @@
     // design -> framebuffer (what the game lays out against, i.e. cv.width/height)
     // -> client pixels (what the event carries). The two differ: the CSS box and the
     // drawing buffer are not always the same size, and miniquad rescales by that ratio.
+    // must mirror Layout::new in src/main.rs, or taps land in the wrong place
+    var design = function () {
+      var w = cv.width, h = cv.height;
+      if (h > w * 1.15) {
+        var dw = 470;
+        return [dw, Math.min(Math.max(dw * h / w, 700), 1400)];
+      }
+      return [1600, 900];
+    };
     var mouse = function (type, x, y) {
-      var s = Math.min(cv.width / 1600, cv.height / 900);
-      var gx = (cv.width - 1600 * s) / 2 + x * s;
-      var gy = (cv.height - 900 * s) / 2 + y * s;
+      var d = design();
+      var s = Math.min(cv.width / d[0], cv.height / d[1]);
+      var gx = (cv.width - d[0] * s) / 2 + x * s;
+      var gy = (cv.height - d[1] * s) / 2 + y * s;
       var r = cv.getBoundingClientRect();
       var sx = r.left + gx * r.width / cv.width;
       var sy = r.top + gy * r.height / cv.height;
