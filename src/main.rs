@@ -2,25 +2,14 @@
 //!
 //! A value is a physical crate. Handing it to another scope is a move: you no longer have it.
 //! Whether the crate survives a scope is written on the door - its function signature.
-//! The panel on the right is the same program as source, written line by line as you play.
+//! The source panel is the same program, written line by line as you play.
 //!
-//! UI language toggles with L. Prose uses a CJK face when set to Japanese; anything that is
-//! Rust source stays in the code face, because the source itself is not translated.
+//! Layout comes in two shapes. On a wide screen the board sits left of the source panel;
+//! on a phone held upright they stack, board above source, and the rooms flow downwards.
+//! Room positions are never authored - they are derived from each room's depth in the
+//! call graph, so one level definition serves both orientations.
 
 use macroquad::prelude::*;
-
-// Everything is authored in this design space and scaled to whatever the window actually is,
-// so the framebuffer is native resolution on a HiDPI monitor instead of an upscaled blur.
-const DW: f32 = 1600.0;
-const DH: f32 = 900.0;
-
-const RW: f32 = 228.0;
-const RH: f32 = 96.0;
-
-const PANEL_X: f32 = 1150.0;
-const PANEL_W: f32 = 420.0;
-const CODE_H: f32 = 24.0;
-const COMMENT_H: f32 = 19.0;
 
 // ------------------------------------------------------------------ palette
 
@@ -42,9 +31,8 @@ fn alpha(c: Color, a: f32) -> Color {
 }
 
 /// Blend towards `to` and stay opaque. `round_rect` is built from overlapping
-/// rectangles and corner circles, so a translucent fill blends twice where they
-/// meet and the corners show up as darker blobs; anything large enough to notice
-/// has to be drawn opaque.
+/// rectangles and corner circles, so a translucent fill blends twice where they meet
+/// and the corners show up as darker blobs; anything large has to be drawn opaque.
 fn mix(from: Color, to: Color, t: f32) -> Color {
     Color::new(
         from.r + (to.r - from.r) * t,
@@ -92,19 +80,9 @@ struct Room {
     /// Does the value leave this scope alive? (i.e. does the signature return it)
     returns: bool,
     is_goal: bool,
-    pos: Vec2,
 }
 
 impl Room {
-    fn rect(&self) -> Rect {
-        Rect::new(self.pos.x, self.pos.y, RW, RH)
-    }
-    fn center(&self) -> Vec2 {
-        self.pos + vec2(RW / 2.0, RH / 2.0)
-    }
-    fn slot(&self) -> Rect {
-        Rect::new(self.pos.x + RW / 2.0 - 44.0, self.pos.y + RH - 38.0, 88.0, 28.0)
-    }
     /// The source line that defines this scope, derived from the signature so the
     /// board and the code can never disagree.
     fn def_line(&self) -> String {
@@ -124,19 +102,18 @@ impl Room {
     }
 }
 
-fn room(name: &str, sig: &str, binding: &str, returns: bool, x: f32, y: f32) -> Room {
+fn room(name: &str, sig: &str, binding: &str, returns: bool) -> Room {
     Room {
         name: name.into(),
         sig: sig.into(),
         binding: binding.into(),
         returns,
         is_goal: false,
-        pos: vec2(x, y),
     }
 }
 
-fn goal(name: &str, sig: &str, binding: &str, x: f32, y: f32) -> Room {
-    Room { is_goal: true, ..room(name, sig, binding, true, x, y) }
+fn goal(name: &str, sig: &str, binding: &str) -> Room {
+    Room { is_goal: true, ..room(name, sig, binding, true) }
 }
 
 struct Level {
@@ -184,10 +161,7 @@ fn levels() -> Vec<Level> {
                     "コピーではない。渡した側には、もう無い。",
                 ),
             ],
-            goal: S(
-                "Get the crate to `finish`.",
-                "箱を `finish` まで届ける。",
-            ),
+            goal: S("Get the crate to `finish`.", "箱を `finish` まで届ける。"),
             hint: S(
                 "Drag the crate along an arrow to hand it to the next scope.",
                 "矢印をたどって、箱を次のスコープに手渡す。",
@@ -197,9 +171,9 @@ fn levels() -> Vec<Level> {
                 "渡した変数は二度と使えない。これがエラー E0382 の正体。",
             ),
             rooms: vec![
-                room("main", "fn main()", "data", true, 110.0, 400.0),
-                room("takes", "fn takes(s: String) -> String", "s", true, 450.0, 400.0),
-                goal("finish", "fn finish(s: String)", "s", 790.0, 400.0),
+                room("main", "fn main()", "data", true),
+                room("takes", "fn takes(s: String) -> String", "s", true),
+                goal("finish", "fn finish(s: String)", "s"),
             ],
             edges: vec![(0, 1), (1, 2)],
         },
@@ -239,10 +213,10 @@ fn levels() -> Vec<Level> {
                 "`-> String` があるかを見る。それだけで値が生き残るか分かる。",
             ),
             rooms: vec![
-                room("main", "fn main()", "data", true, 110.0, 400.0),
-                room("log", "fn log(s: String)", "s", false, 450.0, 215.0),
-                room("tag", "fn tag(s: String) -> String", "s", true, 450.0, 585.0),
-                goal("deliver", "fn deliver(s: String)", "s", 790.0, 400.0),
+                room("main", "fn main()", "data", true),
+                room("log", "fn log(s: String)", "s", false),
+                room("tag", "fn tag(s: String) -> String", "s", true),
+                goal("deliver", "fn deliver(s: String)", "s"),
             ],
             edges: vec![(0, 1), (0, 2), (1, 3), (2, 3)],
         },
@@ -282,16 +256,152 @@ fn levels() -> Vec<Level> {
                 "所有権は1本の線。分岐も複製もしない。Rustを読むとは、この線を追うこと。",
             ),
             rooms: vec![
-                room("main", "fn main()", "data", true, 30.0, 380.0),
-                room("peek", "fn peek(s: String)", "s", false, 315.0, 200.0),
-                room("wrap", "fn wrap(s: String) -> String", "s", true, 315.0, 560.0),
-                room("drain", "fn drain(s: String)", "s", false, 600.0, 200.0),
-                room("seal", "fn seal(s: String) -> String", "s", true, 600.0, 560.0),
-                goal("ship", "fn ship(s: String)", "s", 885.0, 380.0),
+                room("main", "fn main()", "data", true),
+                room("peek", "fn peek(s: String)", "s", false),
+                room("wrap", "fn wrap(s: String) -> String", "s", true),
+                room("drain", "fn drain(s: String)", "s", false),
+                room("seal", "fn seal(s: String) -> String", "s", true),
+                goal("ship", "fn ship(s: String)", "s"),
             ],
             edges: vec![(0, 1), (0, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 5), (4, 5)],
         },
     ]
+}
+
+// ------------------------------------------------------------------- layout
+
+/// Every coordinate in the game is authored in a design space that is scaled to fill
+/// the window. The design space itself changes shape with the window: a phone held
+/// upright gets a tall, narrow one where the source panel sits under the board.
+struct Layout {
+    dw: f32,
+    dh: f32,
+    portrait: bool,
+    rw: f32,
+    rh: f32,
+    /// where rooms are laid out
+    board: Rect,
+    panel: Rect,
+    code_h: f32,
+    comment_h: f32,
+    code_size: f32,
+    bar_y: f32,
+    bar_h: f32,
+    brief: Rect,
+}
+
+impl Layout {
+    fn new(sw: f32, sh: f32) -> Layout {
+        if sh > sw * 1.15 {
+            // Narrow design space so a design unit is close to a CSS pixel; otherwise
+            // everything scales down to the point of being unreadable on a phone.
+            let dw = 470.0;
+            let dh = (dw * sh / sw).clamp(700.0, 1400.0);
+            let top = 88.0;
+            let bar_y = dh - 46.0;
+            let avail = bar_y - 12.0 - top;
+            // the source panel needs the larger share: the deepest level is twelve
+            // lines plus nine comments, and it must not run past the bottom
+            let board_h = avail * 0.45;
+            Layout {
+                dw,
+                dh,
+                portrait: true,
+                rw: 218.0,
+                rh: 74.0,
+                board: Rect::new(8.0, top, dw - 16.0, board_h),
+                panel: Rect::new(8.0, top + board_h + 12.0, dw - 16.0, avail - board_h - 12.0),
+                code_h: 19.0,
+                comment_h: 15.0,
+                code_size: 12.0,
+                bar_y,
+                bar_h: 34.0,
+                brief: Rect::new(10.0, 96.0, dw - 20.0, dh - 190.0),
+            }
+        } else {
+            Layout {
+                dw: 1600.0,
+                dh: 900.0,
+                portrait: false,
+                rw: 228.0,
+                rh: 96.0,
+                board: Rect::new(20.0, 110.0, 1110.0, 700.0),
+                panel: Rect::new(1150.0, 100.0, 420.0, 720.0),
+                code_h: 24.0,
+                comment_h: 19.0,
+                code_size: 15.0,
+                bar_y: 846.0,
+                bar_h: 32.0,
+                brief: Rect::new(105.0, 165.0, 920.0, 550.0),
+            }
+        }
+    }
+
+    /// The half of the screen the board lives on - what the end-of-level overlays cover.
+    fn stage(&self) -> Rect {
+        if self.portrait {
+            Rect::new(0.0, 0.0, self.dw, self.panel.y - 6.0)
+        } else {
+            Rect::new(0.0, 0.0, self.panel.x - 20.0, self.dh)
+        }
+    }
+
+    fn slot_of(&self, r: Rect) -> Rect {
+        let w = self.rw * 0.4;
+        let h = self.rh * 0.29;
+        Rect::new(r.x + r.w / 2.0 - w / 2.0, r.y + r.h - h - 9.0, w, h)
+    }
+}
+
+/// Longest path from the entry room. Rooms sharing a depth are drawn side by side,
+/// which reproduces the hand-placed columns exactly while costing no authoring.
+fn depths(lvl: &Level) -> Vec<usize> {
+    let n = lvl.rooms.len();
+    let mut d = vec![0usize; n];
+    for _ in 0..n {
+        for &(a, b) in &lvl.edges {
+            if d[b] < d[a] + 1 {
+                d[b] = d[a] + 1;
+            }
+        }
+    }
+    d
+}
+
+fn place_rooms(lay: &Layout, lvl: &Level) -> Vec<Rect> {
+    let d = depths(lvl);
+    let steps = d.iter().max().copied().unwrap_or(0) as f32 + 1.0;
+    let mut out = vec![Rect::new(0.0, 0.0, lay.rw, lay.rh); lvl.rooms.len()];
+
+    for g in 0..steps as usize {
+        let group: Vec<usize> = (0..d.len()).filter(|&i| d[i] == g).collect();
+        let k = group.len() as f32;
+        for (j, &i) in group.iter().enumerate() {
+            let j = j as f32;
+            out[i] = if lay.portrait {
+                let step = lay.board.h / steps;
+                let gap = 14.0;
+                let span = k * lay.rw + (k - 1.0) * gap;
+                Rect::new(
+                    lay.board.x + (lay.board.w - span) / 2.0 + j * (lay.rw + gap),
+                    lay.board.y + step * (g as f32 + 0.5) - lay.rh / 2.0,
+                    lay.rw,
+                    lay.rh,
+                )
+            } else {
+                let step = lay.board.w / steps;
+                let gap = 150.0;
+                let span = k * lay.rh + (k - 1.0) * gap;
+                Rect::new(
+                    lay.board.x + step * (g as f32 + 0.5) - lay.rw / 2.0,
+                    lay.board.y + (lay.board.h - span) / 2.0 + j * (lay.rh + gap),
+                    lay.rw,
+                    lay.rh,
+                )
+            };
+        }
+    }
+    out
 }
 
 // -------------------------------------------------------------------- state
@@ -359,8 +469,6 @@ struct Game {
     status: Status,
     err: Option<(Diag, f32)>,
     hover_room: Option<usize>,
-    /// Room highlighted because the pointer is over its source line.
-    hover_from_code: Option<usize>,
     t: f32,
 }
 
@@ -378,7 +486,6 @@ impl Game {
             status: Status::Briefing,
             err: None,
             hover_room: None,
-            hover_from_code: None,
             t: 0.0,
         }
     }
@@ -496,6 +603,7 @@ impl Game {
 // ----------------------------------------------------------------- ui / draw
 
 struct Ui {
+    lay: Layout,
     s: f32,
     ox: f32,
     oy: f32,
@@ -508,9 +616,10 @@ struct Ui {
 impl Ui {
     fn sync(&mut self) {
         let (w, h) = (screen_width(), screen_height());
-        self.s = (w / DW).min(h / DH);
-        self.ox = (w - DW * self.s) / 2.0;
-        self.oy = (h - DH * self.s) / 2.0;
+        self.lay = Layout::new(w, h);
+        self.s = (w / self.lay.dw).min(h / self.lay.dh);
+        self.ox = (w - self.lay.dw * self.s) / 2.0;
+        self.oy = (h - self.lay.dh * self.s) / 2.0;
     }
     fn px(&self, x: f32) -> f32 {
         self.ox + x * self.s
@@ -527,7 +636,7 @@ impl Ui {
         s.get(self.lang)
     }
     /// Prose sitting inside the code panel: the code face reads better in English,
-    /// but Consolas has no kana, so Japanese has to fall back to the CJK face.
+    /// but the mono face has no kana, so Japanese falls back to the CJK face.
     fn gloss_face(&self) -> Face {
         match self.lang {
             Lang::Ja => Face::Sans,
@@ -540,7 +649,6 @@ impl Ui {
             Face::Sans => self.sans.as_ref(),
         }
     }
-    /// The language toggle only makes sense if the face that has kana loaded.
     fn bilingual(&self) -> bool {
         self.sans.is_some()
     }
@@ -571,13 +679,47 @@ impl Ui {
     fn text_right(&self, txt: &str, rx: f32, y: f32, size: f32, col: Color, f: Face) {
         self.text(txt, rx - self.width(txt, size, f), y, size, col, f);
     }
+    /// Greedy wrap. Japanese has no spaces, so it breaks anywhere; English prefers
+    /// a space. Needed because the briefing text does not fit a phone in one line.
+    fn wrap(&self, txt: &str, size: f32, max_w: f32, f: Face) -> Vec<String> {
+        if self.width(txt, size, f) <= max_w {
+            return vec![txt.to_string()];
+        }
+        let mut lines = Vec::new();
+        let mut cur = String::new();
+        for ch in txt.chars() {
+            let mut trial = cur.clone();
+            trial.push(ch);
+            if self.width(&trial, size, f) > max_w && !cur.is_empty() {
+                // back up to the last space for latin text
+                if ch.is_ascii() {
+                    if let Some(k) = cur.rfind(' ') {
+                        let rest = cur[k + 1..].to_string();
+                        cur.truncate(k);
+                        lines.push(std::mem::take(&mut cur));
+                        cur = rest;
+                        cur.push(ch);
+                        continue;
+                    }
+                }
+                lines.push(std::mem::take(&mut cur));
+                cur.push(ch);
+            } else {
+                cur = trial;
+            }
+        }
+        if !cur.is_empty() {
+            lines.push(cur);
+        }
+        lines
+    }
 
-    fn rect(&self, x: f32, y: f32, w: f32, h: f32, col: Color) {
-        draw_rectangle(self.px(x), self.py(y), w * self.s, h * self.s, col);
+    fn rect(&self, r: Rect, col: Color) {
+        draw_rectangle(self.px(r.x), self.py(r.y), r.w * self.s, r.h * self.s, col);
     }
     fn round_rect(&self, x: f32, y: f32, w: f32, h: f32, r: f32, col: Color) {
         let (x, y, w, h, r) = (self.px(x), self.py(y), w * self.s, h * self.s, r * self.s);
-        let r = r.min(w / 2.0).min(h / 2.0);
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
         draw_rectangle(x + r, y, w - 2.0 * r, h, col);
         draw_rectangle(x, y + r, r, h - 2.0 * r, col);
         draw_rectangle(x + w - r, y + r, r, h - 2.0 * r, col);
@@ -590,15 +732,12 @@ impl Ui {
             draw_circle(cx, cy, r, col);
         }
     }
-    /// Outline drawn as a slightly inflated rounded rect behind the fill - cheap,
-    /// and the corners stay smooth under MSAA.
     fn round_frame(&self, x: f32, y: f32, w: f32, h: f32, r: f32, fill: Color, edge: Color, t: f32) {
         self.round_rect(x - t, y - t, w + 2.0 * t, h + 2.0 * t, r + t, edge);
         self.round_rect(x, y, w, h, r, fill);
     }
     fn line(&self, a: Vec2, b: Vec2, thick: f32, col: Color) {
         draw_line(self.px(a.x), self.py(a.y), self.px(b.x), self.py(b.y), thick * self.s, col);
-        // round the caps so thick corridors do not end in a hard chisel
         draw_circle(self.px(a.x), self.py(a.y), thick * self.s / 2.0, col);
         draw_circle(self.px(b.x), self.py(b.y), thick * self.s / 2.0, col);
     }
@@ -619,17 +758,26 @@ fn exit_point(c: Vec2, hw: f32, hh: f32, dir: Vec2) -> Vec2 {
     c + dir * tx.min(ty)
 }
 
-fn draw_arrow(ui: &Ui, a: Vec2, b: Vec2, col: Color, thick: f32) {
-    let dir = (b - a).normalize();
-    let a = exit_point(a, RW / 2.0, RH / 2.0, dir) + dir * 10.0;
-    let b = exit_point(b, RW / 2.0, RH / 2.0, -dir) - dir * 10.0;
-    if (b - a).dot(dir) <= 4.0 {
+fn draw_arrow(ui: &Ui, ra: Rect, rb: Rect, col: Color, thick: f32) {
+    let (a, b) = (
+        vec2(ra.x + ra.w / 2.0, ra.y + ra.h / 2.0),
+        vec2(rb.x + rb.w / 2.0, rb.y + rb.h / 2.0),
+    );
+    let dir = (b - a).normalize_or_zero();
+    if dir == Vec2::ZERO {
         return;
     }
-    let head = b - dir * 13.0;
-    ui.line(a, head, thick, col);
+    let pad = if ui.lay.portrait { 6.0 } else { 10.0 };
+    let a = exit_point(a, ra.w / 2.0, ra.h / 2.0, dir) + dir * pad;
+    let b = exit_point(b, rb.w / 2.0, rb.h / 2.0, -dir) - dir * pad;
+    if (b - a).dot(dir) <= 3.0 {
+        return;
+    }
+    let head = 9.0 + thick * 1.4;
+    let tip = b - dir * head;
+    ui.line(a, tip, thick, col);
     let n = vec2(-dir.y, dir.x);
-    ui.tri(b, head + n * 8.0, head - n * 8.0, col);
+    ui.tri(b, tip + n * head * 0.55, tip - n * head * 0.55, col);
 }
 
 fn draw_crate(ui: &Ui, r: Rect, label: &str, scale: f32, a: f32, glow: f32) {
@@ -644,7 +792,6 @@ fn draw_crate(ui: &Ui, r: Rect, label: &str, scale: f32, a: f32, glow: f32) {
     }
     ui.round_rect(x + 1.0, y + 3.0, w, h, 7.0, alpha(BLACK, 0.35 * a));
     ui.round_rect(x, y, w, h, 7.0, alpha(AMBER, a));
-    // a lighter band across the top reads as a lid without needing a sprite
     ui.round_rect(
         x + 3.0,
         y + 3.0,
@@ -657,18 +804,16 @@ fn draw_crate(ui: &Ui, r: Rect, label: &str, scale: f32, a: f32, glow: f32) {
         ui.text_center(
             label,
             cx,
-            cy + h * 0.17,
-            17.0,
+            cy + h * 0.19,
+            h * 0.6,
             alpha(Color::new(0.10, 0.08, 0.04, 1.0), a),
             Face::Mono,
         );
     }
 }
 
-fn draw_room(ui: &Ui, g: &Game, i: usize, reachable: bool, lit: bool) {
+fn draw_room(ui: &Ui, g: &Game, i: usize, rc: Rect, reachable: bool, lit: bool) {
     let r = &g.lvl().rooms[i];
-    let rc = r.rect();
-
     let edge = if r.is_goal {
         GREEN
     } else if reachable || lit {
@@ -678,166 +823,34 @@ fn draw_room(ui: &Ui, g: &Game, i: usize, reachable: bool, lit: bool) {
     };
     let t = if reachable || lit { 2.2 } else { 1.2 };
 
-    ui.round_rect(rc.x + 2.0, rc.y + 6.0, rc.w, rc.h, 12.0, alpha(BLACK, 0.35));
+    ui.round_rect(rc.x + 2.0, rc.y + 5.0, rc.w, rc.h, 12.0, alpha(BLACK, 0.35));
     if lit {
         ui.round_rect(rc.x - 7.0, rc.y - 7.0, rc.w + 14.0, rc.h + 14.0, 18.0, alpha(BLUE, 0.10));
     }
     ui.round_frame(rc.x, rc.y, rc.w, rc.h, 11.0, ROOM, edge, t);
 
     // the scope name and its signature are both Rust, so both stay in the code face
-    ui.text_center(&r.name, rc.x + rc.w / 2.0, rc.y + 27.0, 20.0, INK, Face::Mono);
-    // JetBrains Mono is wider than the system faces this was first sized against;
-    // the longest signature has to clear the box, so it is shrunk to fit.
-    ui.text_center(&r.sig, rc.x + rc.w / 2.0, rc.y + 48.0, 11.5, DIM, Face::Mono);
+    let name_size = rc.h * 0.21;
+    ui.text_center(&r.name, rc.x + rc.w / 2.0, rc.y + rc.h * 0.28, name_size, INK, Face::Mono);
+    // shrink the signature until it clears the box - it is the thing to be read
+    let mut sig = rc.h * 0.135;
+    while sig > 6.0 && ui.width(&r.sig, sig, Face::Mono) > rc.w - 12.0 {
+        sig -= 0.5;
+    }
+    ui.text_center(&r.sig, rc.x + rc.w / 2.0, rc.y + rc.h * 0.5, sig, DIM, Face::Mono);
 
-    let slot = r.slot();
+    let slot = ui.lay.slot_of(rc);
     ui.round_frame(slot.x, slot.y, slot.w, slot.h, 6.0, alpha(BLACK, 0.18), alpha(LINE, 0.9), 1.0);
 
     if g.ghosts[i] && g.holder != i {
         let c = alpha(FAINT, 0.85);
-        ui.text_center(&r.binding, slot.x + slot.w / 2.0, slot.y + 19.0, 16.0, c, Face::Mono);
-        let w = ui.width(&r.binding, 16.0, Face::Mono);
+        let size = slot.h * 0.6;
+        ui.text_center(&r.binding, slot.x + slot.w / 2.0, slot.y + slot.h * 0.7, size, c, Face::Mono);
+        let w = ui.width(&r.binding, size, Face::Mono);
         let cx = slot.x + slot.w / 2.0;
-        ui.line(vec2(cx - w / 2.0, slot.y + 14.0), vec2(cx + w / 2.0, slot.y + 14.0), 1.2, c);
+        let y = slot.y + slot.h * 0.5;
+        ui.line(vec2(cx - w / 2.0, y), vec2(cx + w / 2.0, y), 1.2, c);
     }
-}
-
-// --------------------------------------------------------------------- panel
-
-/// The compiler-style diagnostic, as (text, face, colour) rows.
-fn diag_rows(ui: &Ui, g: &Game, d: &Diag) -> Vec<(String, Face, Color)> {
-    let rooms = &g.lvl().rooms;
-    match *d {
-        Diag::NoEdge(a, b) => {
-            let (a, b) = (&rooms[a].name, &rooms[b].name);
-            vec![
-                (
-                    match ui.lang {
-                        Lang::En => format!("no call from `{a}` to `{b}`"),
-                        Lang::Ja => format!("`{a}` から `{b}` を呼ぶ経路はない"),
-                    },
-                    Face::Sans,
-                    RED,
-                ),
-                (
-                    ui.tr(&S("follow an arrow", "矢印をたどること")).into(),
-                    Face::Sans,
-                    DIM,
-                ),
-            ]
-        }
-        Diag::Moved(i) => {
-            let b = &rooms[i].binding;
-            let culprit = g.path.get(1).map(|&j| rooms[j].call_line()).unwrap_or_default();
-            vec![
-                (format!("error[E0382]: use of moved value: `{b}`"), Face::Mono, RED),
-                (culprit.trim().to_string(), Face::Mono, DIM),
-                (
-                    ui.tr(&S(
-                        "moved out here - it cannot be used again",
-                        "ここでムーブされた。この値はもう使えない",
-                    ))
-                    .into(),
-                    Face::Sans,
-                    DIM,
-                ),
-            ]
-        }
-    }
-}
-
-/// Draws the source panel and returns the room whose line is under the pointer.
-fn draw_panel(ui: &Ui, g: &Game, lines: &[CodeLine], m: Vec2) -> Option<usize> {
-    ui.round_frame(PANEL_X, 100.0, PANEL_W, 720.0, 12.0, PANEL, LINE, 1.0);
-    ui.text("main.rs", PANEL_X + 20.0, 130.0, 14.0, FAINT, Face::Mono);
-    ui.line(
-        vec2(PANEL_X + 16.0, 142.0),
-        vec2(PANEL_X + PANEL_W - 16.0, 142.0),
-        1.0,
-        alpha(LINE, 0.8),
-    );
-
-    let x0 = PANEL_X + 20.0;
-    let mut hovered = None;
-    let mut y = 172.0;
-
-    let live_idx = lines
-        .iter()
-        .rposition(|x| matches!(x.kind, LineKind::Body | LineKind::Dead));
-
-    for (n, l) in lines.iter().enumerate() {
-        let row = Rect::new(PANEL_X + 6.0, y - 17.0, PANEL_W - 12.0, CODE_H);
-        let over = row.contains(m) && !l.text.is_empty();
-        if over {
-            hovered = l.room;
-        }
-        let live = live_idx == Some(n);
-
-        if live || over {
-            let c = match l.kind {
-                LineKind::Dead => alpha(RED, 0.13),
-                _ if live => alpha(BLUE, 0.11),
-                _ => alpha(BLUE, 0.06),
-            };
-            ui.round_rect(row.x, row.y, row.w, row.h, 5.0, c);
-        }
-        if live {
-            let bar = if l.kind == LineKind::Dead { RED } else { BLUE };
-            ui.round_rect(PANEL_X + 6.0, row.y + 3.0, 3.0, CODE_H - 6.0, 1.5, bar);
-        }
-
-        let col = match l.kind {
-            LineKind::Def => DIM,
-            LineKind::Structure => FAINT,
-            LineKind::Preview => alpha(AMBER, 0.55),
-            LineKind::Dead => RED,
-            LineKind::Body => INK,
-        };
-        ui.text(&l.text, x0, y, 15.0, col, Face::Mono);
-        y += CODE_H;
-
-        if ui.comments {
-            if let Some(ref c) = l.comment {
-                let tint = match l.kind {
-                    LineKind::Dead => alpha(RED, 0.65),
-                    LineKind::Preview => alpha(AMBER, 0.4),
-                    _ => COMMENT,
-                };
-                ui.text(
-                    &format!("// {}", ui.tr(c)),
-                    x0 + 12.0,
-                    y + 1.0,
-                    13.0,
-                    tint,
-                    ui.gloss_face(),
-                );
-                y += COMMENT_H;
-            }
-        }
-    }
-
-    // rustc-style diagnostic, anchored under the code
-    if let Some((ref d, t)) = g.err {
-        let a = (t / 0.5).min(1.0);
-        let rows = diag_rows(ui, g, d);
-        let y = y + 34.0;
-        let h = rows.len() as f32 * 21.0 + 20.0;
-        ui.round_frame(
-            PANEL_X + 12.0,
-            y - 21.0,
-            PANEL_W - 24.0,
-            h,
-            8.0,
-            alpha(RED, 0.07),
-            alpha(RED, 0.35 * a),
-            1.0,
-        );
-        for (n, (txt, face, col)) in rows.iter().enumerate() {
-            ui.text(txt, PANEL_X + 26.0, y + n as f32 * 21.0, 14.0, alpha(*col, a), *face);
-        }
-    }
-
-    hovered
 }
 
 // ------------------------------------------------------------------- buttons
@@ -856,35 +869,63 @@ enum Act {
 /// The bottom bar, as tappable rectangles. Built from the same data that draws it,
 /// so the hit boxes cannot drift away from the labels.
 fn key_bar(ui: &Ui, g: &Game) -> Vec<(Rect, Act, String)> {
-    let mut out: Vec<(Rect, Act, String)> = Vec::new();
-    let mut x = 34.0;
-    let mut push = |a: Act, s: &str| {
-        let w = ui.width(s, 15.0, Face::Sans);
-        out.push((Rect::new(x, 846.0, w + 24.0, 32.0), a, s.to_string()));
-        x += w + 42.0;
-    };
+    let lay = &ui.lay;
+    let size = if lay.portrait { 13.0 } else { 15.0 };
+    let pad = if lay.portrait { 8.0 } else { 12.0 };
+    let gap = if lay.portrait { 6.0 } else { 18.0 };
 
+    let mut items: Vec<(Act, String)> = Vec::new();
     if matches!(g.status, Status::Cleared(_)) {
-        let last = g.idx + 1 >= g.levels.len();
-        if !last {
-            push(Act::Next, ui.tr(&S("N  next theme", "N  次のテーマへ")));
+        if g.idx + 1 < g.levels.len() {
+            items.push((Act::Next, ui.tr(&S("N  next", "N  次へ")).into()));
         }
     } else {
-        push(Act::Brief, ui.tr(&S("H  why this level", "H  このステージの狙い")));
-        push(
+        items.push((Act::Brief, ui.tr(&S("H  why this level", "H  狙い")).into()));
+        items.push((
             Act::Comments,
             if ui.comments {
-                ui.tr(&S("C  comments off", "C  コメントを消す"))
+                ui.tr(&S("C  comments off", "C  注釈を消す")).into()
             } else {
-                ui.tr(&S("C  comments on", "C  コメントを出す"))
+                ui.tr(&S("C  comments on", "C  注釈を出す")).into()
             },
-        );
+        ));
     }
-    push(Act::Restart, ui.tr(&S("R  restart", "R  やり直し")));
+    items.push((Act::Restart, ui.tr(&S("R  restart", "R  やり直し")).into()));
     if ui.bilingual() {
-        push(Act::Lang, ui.tr(&S("L  日本語", "L  English")));
+        items.push((Act::Lang, ui.tr(&S("L  日本語", "L  English")).into()));
     }
-    out
+
+    let mut x = if lay.portrait { 6.0 } else { 34.0 };
+    items
+        .into_iter()
+        .map(|(a, s)| {
+            let w = ui.width(&s, size, Face::Sans) + pad * 2.0;
+            let r = Rect::new(x, lay.bar_y, w, lay.bar_h);
+            x += w + gap;
+            (r, a, s)
+        })
+        .collect()
+}
+
+/// The single action the player needs next, as a large button in the middle of the
+/// stage. The shortcut list is fine with a keyboard, but on a phone the
+/// end-of-level screen has to offer one obvious target.
+fn primary_button(ui: &Ui, g: &Game) -> Option<(Rect, Act, String)> {
+    let st = ui.lay.stage();
+    let (act, label, ry) = match g.status {
+        Status::Cleared(_) if g.idx + 1 < g.levels.len() => {
+            (Act::Next, ui.tr(&S("Next theme", "次のテーマへ")), 0.74)
+        }
+        Status::Failed => (Act::Restart, ui.tr(&S("Try again", "やり直す")), 0.66),
+        _ => return None,
+    };
+    let w = (st.w * 0.62).min(340.0);
+    let h = if ui.lay.portrait { 62.0 } else { 70.0 };
+    Some((
+        Rect::new(st.x + (st.w - w) / 2.0, st.y + st.h * ry, w, h),
+        act,
+        label.to_string(),
+    ))
 }
 
 fn do_act(a: Act, g: &mut Game, ui: &mut Ui) {
@@ -910,107 +951,262 @@ fn do_act(a: Act, g: &mut Game, ui: &mut Ui) {
     }
 }
 
-/// The single action the player needs next, as a large button in the middle of the
-/// board. The shortcut list along the bottom is fine with a keyboard, but on a phone
-/// the end-of-level screen has to offer one obvious target.
-fn primary_button(ui: &Ui, g: &Game) -> Option<(Rect, Act, String)> {
-    let bw = PANEL_X - 20.0;
-    let (act, label, y) = match g.status {
-        Status::Cleared(_) if g.idx + 1 < g.levels.len() => (
-            Act::Next,
-            ui.tr(&S("Next theme", "次のテーマへ")),
-            612.0,
-        ),
-        Status::Failed => (Act::Restart, ui.tr(&S("Try again", "やり直す")), 520.0),
-        _ => return None,
-    };
-    let w = 340.0;
-    Some((Rect::new(bw / 2.0 - w / 2.0, y, w, 70.0), act, label.to_string()))
-}
-
 fn draw_primary(ui: &Ui, b: &(Rect, Act, String), m: Vec2, a: f32) {
     let (r, act, label) = b;
     let tint = if *act == Act::Restart { RED } else { GREEN };
     let hot = r.contains(m);
-    let fill = mix(BG, tint, if hot { 0.26 } else { 0.15 });
-    let edge = mix(BG, tint, 0.7);
-    ui.round_frame(r.x, r.y, r.w, r.h, 14.0, fill, edge, 2.0);
-    ui.text_center(label, r.x + r.w / 2.0, r.y + 38.0, 25.0, alpha(tint, a), Face::Sans);
+    ui.round_frame(
+        r.x,
+        r.y,
+        r.w,
+        r.h,
+        14.0,
+        mix(BG, tint, if hot { 0.26 } else { 0.15 }),
+        mix(BG, tint, 0.7),
+        2.0,
+    );
+    ui.text_center(label, r.x + r.w / 2.0, r.y + r.h * 0.55, r.h * 0.34, alpha(tint, a), Face::Sans);
     let key = if *act == Act::Restart { "R" } else { "N" };
     ui.text_center(
         &format!("{key} / tap"),
         r.x + r.w / 2.0,
-        r.y + 58.0,
-        13.0,
+        r.y + r.h * 0.83,
+        r.h * 0.19,
         alpha(FAINT, a),
         Face::Sans,
     );
 }
 
 fn draw_key_bar(ui: &Ui, bar: &[(Rect, Act, String)], m: Vec2) {
+    let size = if ui.lay.portrait { 13.0 } else { 15.0 };
     for (r, _, label) in bar {
         let hot = r.contains(m);
         if hot {
-            ui.round_rect(r.x, r.y, r.w, r.h, 7.0, alpha(BLUE, 0.12));
+            ui.round_rect(r.x, r.y, r.w, r.h, 7.0, mix(BG, BLUE, 0.14));
         }
-        ui.text(label, r.x + 12.0, r.y + 21.0, 15.0, if hot { DIM } else { FAINT }, Face::Sans);
+        ui.text(
+            label,
+            r.x + (r.w - ui.width(label, size, Face::Sans)) / 2.0,
+            r.y + r.h * 0.66,
+            size,
+            if hot { DIM } else { FAINT },
+            Face::Sans,
+        );
     }
 }
 
 // ------------------------------------------------------------------ briefing
 
-/// Answers "why am I being asked to do this" before the level starts, and again
-/// on demand. Covers the board only, so the source panel stays readable.
+/// Answers "why am I being asked to do this" before the level starts, and again on
+/// demand. Covers the stage only, so the source panel stays readable.
 fn draw_briefing(ui: &Ui, l: &Level) {
-    let bw = PANEL_X - 20.0;
-    ui.rect(0.0, 0.0, bw, DH, alpha(BG, 0.94));
+    let st = ui.lay.stage();
+    ui.rect(st, alpha(BG, 0.96));
 
-    let (x, y, w, h) = (105.0, 165.0, 920.0, 550.0);
-    ui.round_rect(x + 2.0, y + 8.0, w, h, 16.0, alpha(BLACK, 0.4));
-    ui.round_frame(x, y, w, h, 15.0, PANEL, LINE, 1.0);
+    let c = ui.lay.brief;
+    ui.round_rect(c.x + 2.0, c.y + 8.0, c.w, c.h, 16.0, alpha(BLACK, 0.4));
+    ui.round_frame(c.x, c.y, c.w, c.h, 15.0, PANEL, LINE, 1.0);
 
-    let px = x + 48.0;
-    let rule = |ui: &Ui, yy: f32| {
-        ui.line(vec2(px, yy), vec2(x + w - 48.0, yy), 1.0, alpha(LINE, 0.8));
-    };
+    let pad = if ui.lay.portrait { 22.0 } else { 48.0 };
+    let px = c.x + pad;
+    let tw = c.w - pad * 2.0;
+    let body = if ui.lay.portrait { 15.0 } else { 17.0 };
+    let lh = body * 1.55;
 
-    // why the language works this way at all - the frame everything else hangs on
-    ui.round_rect(px - 18.0, y + 34.0, 3.0, 62.0, 1.5, alpha(AMBER, 0.7));
+    let mut y = c.y + (if ui.lay.portrait { 34.0 } else { 48.0 });
+
+    ui.round_rect(px - 12.0, y - 14.0, 3.0, lh * 2.0 + 24.0, 1.5, alpha(AMBER, 0.7));
     ui.text(
         ui.tr(&S("WHY RUST IS LIKE THIS", "なぜ Rust はこうなっているのか")),
         px,
-        y + 48.0,
-        13.0,
+        y,
+        12.0,
         FAINT,
         Face::Sans,
     );
-    ui.text(ui.tr(&l.stakes[0]), px, y + 76.0, 17.0, INK, Face::Sans);
-    ui.text(ui.tr(&l.stakes[1]), px, y + 102.0, 17.0, INK, Face::Sans);
-    rule(ui, y + 132.0);
+    y += body * 1.7;
+    for s in &l.stakes {
+        for line in ui.wrap(ui.tr(s), body, tw, Face::Sans) {
+            ui.text(&line, px, y, body, INK, Face::Sans);
+            y += lh;
+        }
+    }
 
-    // the rule this level drills
-    ui.text(ui.tr(&S("THEME", "テーマ")), px, y + 170.0, 13.0, FAINT, Face::Sans);
-    ui.text(ui.tr(&l.concept), px, y + 210.0, 30.0, INK, Face::Sans);
-    ui.text(ui.tr(&l.why[0]), px, y + 246.0, 17.0, DIM, Face::Sans);
-    ui.text(ui.tr(&l.why[1]), px, y + 272.0, 17.0, DIM, Face::Sans);
-    rule(ui, y + 302.0);
+    y += lh * 0.5;
+    ui.line(vec2(px, y), vec2(c.x + c.w - pad, y), 1.0, alpha(LINE, 0.8));
+    y += lh * 1.1;
 
-    // what to actually do
-    ui.text(ui.tr(&S("GOAL", "目的")), px, y + 340.0, 13.0, FAINT, Face::Sans);
-    ui.text(ui.tr(&l.goal), px, y + 376.0, 21.0, GREEN, Face::Sans);
-    ui.text(ui.tr(&l.hint), px, y + 408.0, 16.0, DIM, Face::Sans);
+    ui.text(ui.tr(&S("THEME", "テーマ")), px, y, 12.0, FAINT, Face::Sans);
+    y += if ui.lay.portrait { 34.0 } else { 42.0 };
+    let concept = if ui.lay.portrait { 24.0 } else { 30.0 };
+    ui.text(ui.tr(&l.concept), px, y, concept, INK, Face::Sans);
+    y += lh * 1.4;
+    for s in &l.why {
+        for line in ui.wrap(ui.tr(s), body, tw, Face::Sans) {
+            ui.text(&line, px, y, body, DIM, Face::Sans);
+            y += lh;
+        }
+    }
+
+    y += lh * 0.5;
+    ui.line(vec2(px, y), vec2(c.x + c.w - pad, y), 1.0, alpha(LINE, 0.8));
+    y += lh * 1.1;
+
+    ui.text(ui.tr(&S("GOAL", "目的")), px, y, 12.0, FAINT, Face::Sans);
+    y += if ui.lay.portrait { 30.0 } else { 38.0 };
+    let goal_size = if ui.lay.portrait { 18.0 } else { 21.0 };
+    for line in ui.wrap(ui.tr(&l.goal), goal_size, tw, Face::Sans) {
+        ui.text(&line, px, y, goal_size, GREEN, Face::Sans);
+        y += goal_size * 1.5;
+    }
+    for line in ui.wrap(ui.tr(&l.hint), body * 0.92, tw, Face::Sans) {
+        ui.text(&line, px, y, body * 0.92, DIM, Face::Sans);
+        y += lh * 0.95;
+    }
 
     ui.text_center(
-        ui.tr(&S(
-            "space to begin        H shows this again",
-            "Space で開始        H でいつでも再表示",
-        )),
-        x + w / 2.0,
-        y + h - 34.0,
-        16.0,
+        ui.tr(&S("tap to begin        H shows this again", "タップで開始        H で再表示")),
+        c.x + c.w / 2.0,
+        c.y + c.h - 22.0,
+        if ui.lay.portrait { 13.0 } else { 16.0 },
         FAINT,
         Face::Sans,
     );
+}
+
+// --------------------------------------------------------------------- panel
+
+/// The compiler-style diagnostic, as (text, face, colour) rows.
+fn diag_rows(ui: &Ui, g: &Game, d: &Diag) -> Vec<(String, Face, Color)> {
+    let rooms = &g.lvl().rooms;
+    match *d {
+        Diag::NoEdge(a, b) => {
+            let (a, b) = (&rooms[a].name, &rooms[b].name);
+            vec![
+                (
+                    match ui.lang {
+                        Lang::En => format!("no call from `{a}` to `{b}`"),
+                        Lang::Ja => format!("`{a}` から `{b}` を呼ぶ経路はない"),
+                    },
+                    Face::Sans,
+                    RED,
+                ),
+                (ui.tr(&S("follow an arrow", "矢印をたどること")).into(), Face::Sans, DIM),
+            ]
+        }
+        Diag::Moved(i) => {
+            let b = &rooms[i].binding;
+            let culprit = g.path.get(1).map(|&j| rooms[j].call_line()).unwrap_or_default();
+            vec![
+                (format!("error[E0382]: use of moved value: `{b}`"), Face::Mono, RED),
+                (culprit.trim().to_string(), Face::Mono, DIM),
+                (
+                    ui.tr(&S(
+                        "moved out here - it cannot be used again",
+                        "ここでムーブされた。この値はもう使えない",
+                    ))
+                    .into(),
+                    Face::Sans,
+                    DIM,
+                ),
+            ]
+        }
+    }
+}
+
+/// Draws the source panel and returns the room whose line is under the pointer.
+fn draw_panel(ui: &Ui, g: &Game, lines: &[CodeLine], m: Vec2) -> Option<usize> {
+    let p = ui.lay.panel;
+    ui.round_frame(p.x, p.y, p.w, p.h, 12.0, PANEL, LINE, 1.0);
+    ui.text("main.rs", p.x + 18.0, p.y + 26.0, 13.0, FAINT, Face::Mono);
+    ui.line(
+        vec2(p.x + 14.0, p.y + 38.0),
+        vec2(p.x + p.w - 14.0, p.y + 38.0),
+        1.0,
+        alpha(LINE, 0.8),
+    );
+
+    let x0 = p.x + 18.0;
+    let mut y = p.y + 68.0;
+    let mut hovered = None;
+
+    let live_idx = lines
+        .iter()
+        .rposition(|x| matches!(x.kind, LineKind::Body | LineKind::Dead));
+
+    for (n, l) in lines.iter().enumerate() {
+        let row = Rect::new(p.x + 5.0, y - ui.lay.code_h * 0.72, p.w - 10.0, ui.lay.code_h);
+        let over = row.contains(m) && !l.text.is_empty();
+        if over {
+            hovered = l.room;
+        }
+        let live = live_idx == Some(n);
+
+        if live || over {
+            let c = match l.kind {
+                LineKind::Dead => alpha(RED, 0.13),
+                _ if live => alpha(BLUE, 0.11),
+                _ => alpha(BLUE, 0.06),
+            };
+            ui.round_rect(row.x, row.y, row.w, row.h, 5.0, c);
+        }
+        if live {
+            let bar = if l.kind == LineKind::Dead { RED } else { BLUE };
+            ui.round_rect(p.x + 5.0, row.y + 3.0, 3.0, ui.lay.code_h - 6.0, 1.5, bar);
+        }
+
+        let col = match l.kind {
+            LineKind::Def => DIM,
+            LineKind::Structure => FAINT,
+            LineKind::Preview => alpha(AMBER, 0.55),
+            LineKind::Dead => RED,
+            LineKind::Body => INK,
+        };
+        ui.text(&l.text, x0, y, ui.lay.code_size, col, Face::Mono);
+        y += ui.lay.code_h;
+
+        if ui.comments {
+            if let Some(ref c) = l.comment {
+                let tint = match l.kind {
+                    LineKind::Dead => alpha(RED, 0.65),
+                    LineKind::Preview => alpha(AMBER, 0.4),
+                    _ => COMMENT,
+                };
+                ui.text(
+                    &format!("// {}", ui.tr(c)),
+                    x0 + 10.0,
+                    y + 1.0,
+                    ui.lay.code_size * 0.87,
+                    tint,
+                    ui.gloss_face(),
+                );
+                y += ui.lay.comment_h;
+            }
+        }
+    }
+
+    if let Some((ref d, t)) = g.err {
+        let a = (t / 0.5).min(1.0);
+        let rows = diag_rows(ui, g, d);
+        let size = ui.lay.code_size * 0.93;
+        let rh = size * 1.45;
+        let y = (y + 28.0).min(p.y + p.h - rows.len() as f32 * rh - 26.0);
+        ui.round_frame(
+            p.x + 10.0,
+            y - rh * 0.75,
+            p.w - 20.0,
+            rows.len() as f32 * rh + 18.0,
+            8.0,
+            alpha(RED, 0.07),
+            alpha(RED, 0.35 * a),
+            1.0,
+        );
+        for (n, (txt, face, col)) in rows.iter().enumerate() {
+            ui.text(txt, p.x + 22.0, y + n as f32 * rh, size, alpha(*col, a), *face);
+        }
+    }
+
+    hovered
 }
 
 // ---------------------------------------------------------------------- main
@@ -1028,12 +1224,12 @@ fn window_conf() -> Conf {
     }
 }
 
+// Subsetted to just the characters this game draws by tools/subset-font, which turns
+// 2.6 MB of font into 130 KB. Re-run that tool after adding or changing any text.
+//
 // Fonts are compiled in rather than read from the OS. Reading system paths worked on
 // Windows but hung the whole game on wasm: `C:/...` parses as a URL scheme, the XHR
-// never calls back, and the await before the main loop never resolves - so not a single
-// frame was ever drawn. Embedding also makes every platform render identically.
-// Subsetted to just the characters this game draws by tools/subset-font, which turns
-// 4.8 MB of font into 130 KB. Re-run that tool after adding or changing any text.
+// never calls back, and the await before the main loop never resolves.
 const FONT_SANS: &[u8] = include_bytes!("../assets/jp-subset.ttf");
 const FONT_MONO: &[u8] = include_bytes!("../assets/mono-subset.ttf");
 
@@ -1052,13 +1248,12 @@ fn embedded_font(kind: &str, bytes: &[u8]) -> Option<Font> {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    // Noto Sans JP carries Latin as well as kana and kanji, so one face serves both
-    // languages; JetBrains Mono is Latin-only and is used strictly for Rust source.
     let sans = embedded_font("sans", FONT_SANS);
     let mono = embedded_font("mono", FONT_MONO);
     println!("fonts: sans={} mono={}", sans.is_some(), mono.is_some());
 
     let mut ui = Ui {
+        lay: Layout::new(1600.0, 900.0),
         s: 1.0,
         ox: 0.0,
         oy: 0.0,
@@ -1075,6 +1270,7 @@ async fn main() {
         g.t += dt;
         ui.sync();
         let m = ui.mouse();
+        let rects = place_rooms(&ui.lay, g.lvl());
 
         // ------------------------------------------------------------ input
         if is_key_pressed(KeyCode::R) {
@@ -1106,7 +1302,7 @@ async fn main() {
             *t += dt;
         }
 
-        g.hover_room = (0..g.lvl().rooms.len()).find(|&i| g.lvl().rooms[i].rect().contains(m));
+        g.hover_room = (0..rects.len()).find(|&i| rects[i].contains(m));
 
         // Buttons take the click first and swallow it, so tapping the bar cannot also
         // dismiss the briefing or be read as grabbing the crate.
@@ -1126,11 +1322,11 @@ async fn main() {
 
         if matches!(g.status, Status::Playing) && !consumed {
             if is_mouse_button_pressed(MouseButton::Left) {
-                if g.lvl().rooms[g.holder].slot().contains(m) {
+                if ui.lay.slot_of(rects[g.holder]).contains(m) {
                     g.dragging = true;
                 } else {
-                    for i in 0..g.lvl().rooms.len() {
-                        if g.ghosts[i] && i != g.holder && g.lvl().rooms[i].slot().contains(m) {
+                    for i in 0..rects.len() {
+                        if g.ghosts[i] && i != g.holder && ui.lay.slot_of(rects[i]).contains(m) {
                             g.err = Some((Diag::Moved(i), 4.0));
                         }
                     }
@@ -1167,54 +1363,45 @@ async fn main() {
 
         // ----------------------------------------------------------- render
         clear_background(BG);
-        ui.rect(0.0, 0.0, DW, DH, BG);
+        ui.rect(Rect::new(0.0, 0.0, ui.lay.dw, ui.lay.dh), BG);
 
         let lines = g.source(preview);
         let code_hover = draw_panel(&ui, &g, &lines, m);
-        g.hover_from_code = code_hover;
 
         let holder = g.holder;
         let playing = matches!(g.status, Status::Playing);
-        let edges = g.lvl().edges.clone();
-        for (a, b) in &edges {
-            let live = *a == holder && playing;
-            let col = if live { alpha(BLUE, 0.55) } else { alpha(LINE, 0.7) };
+        for &(a, b) in &g.lvl().edges {
+            let live = a == holder && playing;
             draw_arrow(
                 &ui,
-                g.lvl().rooms[*a].center(),
-                g.lvl().rooms[*b].center(),
-                col,
+                rects[a],
+                rects[b],
+                if live { alpha(BLUE, 0.55) } else { alpha(LINE, 0.7) },
                 if live { 3.0 } else { 2.0 },
             );
         }
-
-        for i in 0..g.lvl().rooms.len() {
-            let reachable = playing && edges.contains(&(holder, i));
-            draw_room(&ui, &g, i, reachable, code_hover == Some(i));
+        for i in 0..rects.len() {
+            let reachable = playing && g.lvl().edges.contains(&(holder, i));
+            draw_room(&ui, &g, i, rects[i], reachable, code_hover == Some(i));
         }
 
+        let slot = ui.lay.slot_of(rects[g.holder]);
         match g.status {
             Status::Dropping(t) => {
                 let k = (t / 0.9).min(1.0);
-                let r = &g.lvl().rooms[g.holder];
-                draw_crate(&ui, r.slot(), &r.binding, 1.0 - k * 0.85, 1.0 - k, 0.0);
-                let rc = r.rect();
+                let b = g.lvl().rooms[g.holder].binding.clone();
+                draw_crate(&ui, slot, &b, 1.0 - k * 0.85, 1.0 - k, 0.0);
+                let rc = rects[g.holder];
                 ui.round_frame(rc.x, rc.y, rc.w, rc.h, 11.0, alpha(BLACK, 0.0), alpha(RED, k), 2.2);
             }
             _ => {
                 let pulse = 0.5 + 0.5 * (g.t * 2.4).sin();
-                let r = &g.lvl().rooms[g.holder];
+                let b = &g.lvl().rooms[g.holder].binding;
                 if g.dragging {
-                    draw_crate(
-                        &ui,
-                        Rect::new(m.x - 44.0, m.y - 14.0, 88.0, 28.0),
-                        &r.binding,
-                        1.0,
-                        1.0,
-                        1.0,
-                    );
+                    let r = Rect::new(m.x - slot.w / 2.0, m.y - slot.h / 2.0, slot.w, slot.h);
+                    draw_crate(&ui, r, b, 1.0, 1.0, 1.0);
                 } else {
-                    draw_crate(&ui, r.slot(), &r.binding, 1.0, 1.0, if playing { pulse } else { 0.0 });
+                    draw_crate(&ui, slot, b, 1.0, 1.0, if playing { pulse } else { 0.0 });
                 }
             }
         }
@@ -1224,21 +1411,33 @@ async fn main() {
         }
 
         // ------------------------------------------------------------ chrome
-        let bw = PANEL_X - 20.0;
-        ui.text(ui.tr(&g.lvl().title), 40.0, 52.0, 24.0, INK, Face::Sans);
-        // the objective stays on screen for the whole level, not just the briefing
+        let st = ui.lay.stage();
+        let title = if ui.lay.portrait { 19.0 } else { 24.0 };
+        ui.text(ui.tr(&g.lvl().title), 16.0, title * 1.7, title, INK, Face::Sans);
         let label = ui.tr(&S("GOAL", "目的"));
-        ui.text(label, 40.0, 80.0, 13.0, FAINT, Face::Sans);
-        let gx = 40.0 + ui.width(label, 13.0, Face::Sans) + 14.0;
-        ui.text(ui.tr(&g.lvl().goal), gx, 80.0, 16.0, DIM, Face::Sans);
+        let gs = if ui.lay.portrait { 13.0 } else { 16.0 };
+        ui.text(label, 16.0, title * 1.7 + gs * 1.6, 11.5, FAINT, Face::Sans);
+        ui.text(
+            ui.tr(&g.lvl().goal),
+            16.0 + ui.width(label, 11.5, Face::Sans) + 10.0,
+            title * 1.7 + gs * 1.6,
+            gs,
+            DIM,
+            Face::Sans,
+        );
 
         let moves = g.path.len() - 1;
-        let m_txt = match ui.lang {
-            Lang::En => format!("{moves} moves"),
-            Lang::Ja => format!("{moves} 手"),
-        };
-        ui.text_right(&m_txt, PANEL_X + PANEL_W, 52.0, 16.0, DIM, Face::Sans);
-
+        ui.text_right(
+            &match ui.lang {
+                Lang::En => format!("{moves} moves"),
+                Lang::Ja => format!("{moves} 手"),
+            },
+            ui.lay.dw - 16.0,
+            title * 1.7,
+            gs,
+            DIM,
+            Face::Sans,
+        );
 
         if matches!(g.status, Status::Failed) {
             let r = &g.lvl().rooms[g.holder];
@@ -1246,16 +1445,16 @@ async fn main() {
                 Lang::En => format!("`{}` dropped at the end of `{}`", r.binding, r.name),
                 Lang::Ja => format!("`{}` は `{}` の終わりで破棄された", r.binding, r.name),
             };
-            ui.rect(0.0, 380.0, bw, 240.0, alpha(BG, 0.93));
-            ui.text_center(&msg, bw / 2.0, 435.0, 24.0, RED, Face::Sans);
+            let size = if ui.lay.portrait { 17.0 } else { 24.0 };
+            ui.rect(Rect::new(st.x, st.y + st.h * 0.34, st.w, st.h * 0.34), alpha(BG, 0.95));
+            for (n, line) in ui.wrap(&msg, size, st.w - 40.0, Face::Sans).iter().enumerate() {
+                ui.text_center(line, st.x + st.w / 2.0, st.y + st.h * 0.44 + n as f32 * size * 1.5, size, RED, Face::Sans);
+            }
             ui.text_center(
-                ui.tr(&S(
-                    "that scope never returns it",
-                    "そのスコープは値を返さない",
-                )),
-                bw / 2.0,
-                470.0,
-                17.0,
+                ui.tr(&S("that scope never returns it", "そのスコープは値を返さない")),
+                st.x + st.w / 2.0,
+                st.y + st.h * 0.56,
+                size * 0.72,
                 DIM,
                 Face::Sans,
             );
@@ -1263,54 +1462,44 @@ async fn main() {
 
         if let Status::Cleared(t) = g.status {
             let a = (t / 0.35).min(1.0);
-            // fully opaque once faded in: the board showing through collided with the
-            // takeaway text and made both hard to read
-            ui.rect(0.0, 0.0, bw, DH, alpha(BG, a));
+            ui.rect(st, alpha(BG, a));
+            let big = if ui.lay.portrait { 30.0 } else { 42.0 };
+            let body = if ui.lay.portrait { 15.0 } else { 18.0 };
+            let cx = st.x + st.w / 2.0;
+            let mut y = st.y + st.h * 0.3;
+            ui.text_center(ui.tr(&S("delivered", "配達完了")), cx, y, big, alpha(GREEN, a), Face::Sans);
+            y += body * 2.2;
             ui.text_center(
-                ui.tr(&S("delivered", "配達完了")),
-                bw / 2.0,
-                348.0,
-                42.0,
-                alpha(GREEN, a),
+                &match ui.lang {
+                    Lang::En => format!("{moves} moves, nothing copied"),
+                    Lang::Ja => format!("{moves} 手  -  コピーは一度も起きていない"),
+                },
+                cx,
+                y,
+                body,
+                alpha(DIM, a),
                 Face::Sans,
             );
-            let sub = match ui.lang {
-                Lang::En => format!("{moves} moves, nothing copied"),
-                Lang::Ja => format!("{moves} 手  -  コピーは一度も起きていない"),
-            };
-            ui.text_center(&sub, bw / 2.0, 384.0, 18.0, alpha(DIM, a), Face::Sans);
-
-            // the point of the level, restated now that the player has actually done it
+            y += body * 2.6;
             ui.text_center(
                 ui.tr(&S("WHAT THAT WAS", "いま起きたこと")),
-                bw / 2.0,
-                452.0,
-                13.0,
+                cx,
+                y,
+                11.5,
                 alpha(FAINT, a),
                 Face::Sans,
             );
-            ui.text_center(ui.tr(&g.lvl().takeaway), bw / 2.0, 488.0, 20.0, alpha(INK, a), Face::Sans);
-            ui.text_center(
-                ui.tr(&S(
-                    "the program you just wrote is on the right",
-                    "いま書いたプログラムが右にある",
-                )),
-                bw / 2.0,
-                528.0,
-                16.0,
-                alpha(FAINT, a),
-                Face::Sans,
-            );
-            // the button itself is drawn below; only the final level has no next step
+            y += body * 1.9;
+            for line in ui.wrap(ui.tr(&g.lvl().takeaway), body * 1.15, st.w - 48.0, Face::Sans) {
+                ui.text_center(&line, cx, y, body * 1.15, alpha(INK, a), Face::Sans);
+                y += body * 1.8;
+            }
             if g.idx + 1 >= g.levels.len() {
                 ui.text_center(
-                    ui.tr(&S(
-                        "next: shared references, then &mut",
-                        "次は共有参照、そして &mut",
-                    )),
-                    bw / 2.0,
-                    600.0,
-                    20.0,
+                    ui.tr(&S("next: shared references, then &mut", "次は共有参照、そして &mut")),
+                    cx,
+                    st.y + st.h * 0.78,
+                    body * 1.1,
                     alpha(GREEN, a),
                     Face::Sans,
                 );
@@ -1319,7 +1508,6 @@ async fn main() {
 
         // Controls last, so the end-of-level overlays cannot paint over them - that is
         // exactly what hid the Next button and left a phone with no way forward.
-        // Rebuilt after input so labels reflect anything a tap just changed.
         draw_key_bar(&ui, &key_bar(&ui, &g), m);
         if let Some(b) = primary_button(&ui, &g) {
             let a = match g.status {
