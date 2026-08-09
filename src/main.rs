@@ -381,13 +381,16 @@ fn place_rooms(lay: &Layout, lvl: &Level) -> Vec<Rect> {
             let j = j as f32;
             out[i] = if lay.portrait {
                 let step = lay.board.h / steps;
+                // Deep levels pack the rows close enough that the arrow between them
+                // has no room left; shorten the rooms so a usable gap always survives.
+                let rh = lay.rh.min(step - 30.0).max(44.0);
                 let gap = 14.0;
                 let span = k * lay.rw + (k - 1.0) * gap;
                 Rect::new(
                     lay.board.x + (lay.board.w - span) / 2.0 + j * (lay.rw + gap),
-                    lay.board.y + step * (g as f32 + 0.5) - lay.rh / 2.0,
+                    lay.board.y + step * (g as f32 + 0.5) - rh / 2.0,
                     lay.rw,
-                    lay.rh,
+                    rh,
                 )
             } else {
                 let step = lay.board.w / steps;
@@ -768,13 +771,15 @@ fn draw_arrow(ui: &Ui, ra: Rect, rb: Rect, col: Color, thick: f32) {
     if dir == Vec2::ZERO {
         return;
     }
-    let pad = if ui.lay.portrait { 6.0 } else { 10.0 };
+    let pad = if ui.lay.portrait { 4.0 } else { 9.0 };
     let a = exit_point(a, ra.w / 2.0, ra.h / 2.0, dir) + dir * pad;
     let b = exit_point(b, rb.w / 2.0, rb.h / 2.0, -dir) - dir * pad;
-    if (b - a).dot(dir) <= 3.0 {
+    let len = (b - a).dot(dir);
+    if len <= 4.0 {
         return;
     }
-    let head = 9.0 + thick * 1.4;
+    // never let the head eat the whole arrow when rooms are close together
+    let head = (9.0 + thick * 1.4).min(len * 0.6);
     let tip = b - dir * head;
     ui.line(a, tip, thick, col);
     let n = vec2(-dir.y, dir.x);
